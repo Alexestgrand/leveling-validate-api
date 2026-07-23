@@ -10,8 +10,10 @@ import (
 )
 
 const (
-	attemptsKeyPrefix = "attempts:"
-	winnerKeyPrefix   = "winner:"
+	attemptsKeyPrefix     = "attempts:"
+	winnerKeyPrefix       = "winner:"
+	statsTotalAttemptsKey = "stats:total_attempts"
+	statsTestersKey       = "stats:testers"
 )
 
 // Client wraps go-redis with domain-specific helpers for rate limiting and winners.
@@ -152,6 +154,49 @@ func (c *Client) IsRateLimited(ctx context.Context, userID string, maxAttempts i
 		return false, err
 	}
 	return count >= maxAttempts, nil
+}
+
+// SubmissionStats holds aggregate public counters for phrase testing activity.
+type SubmissionStats struct {
+	TotalAttempts int64 `json:"total_attempts"`
+	UniqueTesters int64 `json:"unique_testers"`
+}
+
+// RecordSubmissionStats increments global attempt count and tracks unique testers.
+// Failures are non-fatal for the validate flow — callers may log and continue.
+func (c *Client) RecordSubmissionStats(ctx context.Context, userID string) error {
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+
+	pipe := c.rdb.Pipeline()
+	pipe.Incr(ctx, statsTotalAttemptsKey)
+	pipe.SAdd(ctx, statsTestersKey, userID)
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+// GetSubmissionStats returns public counters for the live site dashboard.
+func (c *Client) GetSubmissionStats(ctx context.Context) (SubmissionStats, error) {
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+
+	var stats SubmissionStats
+
+	total, err := c.rdb.Get(ctx, statsTotalAttemptsKey).Int64()
+	if err == redis.Nil {
+		total = 0
+	} else if err != nil {
+		return stats, err
+	}
+
+	unique, err := c.rdb.SCard(ctx, statsTestersKey).Result()
+	if err != nil {
+		return stats, err
+	}
+
+	stats.TotalAttempts = total
+	stats.UniqueTesters = unique
+	return stats, nil
 }
 
 // Raw exposes the underlying client for health checks or testing.

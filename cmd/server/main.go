@@ -43,6 +43,7 @@ func main() {
 	authHandler := handlers.NewAuthHandler(cfg, oauthClient, redisClient)
 	validateHandler := handlers.NewValidateHandler(cfg, redisClient)
 	healthHandler := handlers.NewHealthHandler(redisClient)
+	statsHandler := handlers.NewStatsHandler(redisClient)
 
 	router := gin.New()
 	router.Use(gin.Recovery())
@@ -50,6 +51,7 @@ func main() {
 	router.Use(middleware.CORS(cfg.AllowedOrigins))
 
 	router.GET("/health", healthHandler.Health)
+	router.GET("/stats", statsHandler.Stats)
 
 	auth := router.Group("/auth")
 	{

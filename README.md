@@ -87,6 +87,7 @@ sequenceDiagram
 | Méthode | Route | Auth | Description |
 |---------|-------|------|-------------|
 | GET | `/health` | Non | Santé + statut Redis |
+| GET | `/stats` | Non | Compteurs live : `total_attempts`, `unique_testers` |
 | GET | `/auth/discord` | Non | Redirect OAuth Discord |
 | GET | `/auth/discord/callback` | Non | Callback OAuth |
 | GET | `/auth/me` | JWT | Profil + `remaining_attempts` |
@@ -98,6 +99,9 @@ sequenceDiagram
 ```bash
 # Santé
 curl http://localhost:8080/health
+
+# Compteurs live
+curl http://localhost:8080/stats
 
 # Profil (avec cookie session)
 curl -b "session=<jwt>" http://localhost:8080/auth/me

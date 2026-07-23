@@ -112,6 +112,9 @@ func (h *ValidateHandler) Validate(c *gin.Context) {
 		return
 	}
 
+	// Best-effort public counters — never block validation on stats failure.
+	_ = h.redis.RecordSubmissionStats(ctx, user.DiscordUserID)
+
 	remaining := h.cfg.MaxAttemptsPerDay - count
 	if remaining < 0 {
 		remaining = 0

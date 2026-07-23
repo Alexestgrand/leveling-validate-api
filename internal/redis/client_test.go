@@ -61,6 +61,51 @@ func TestRateLimitWindow(t *testing.T) {
 	}
 }
 
+func TestSubmissionStats(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	client, err := NewClient("redis://"+mr.Addr()+"/0", 2*time.Second)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+
+	stats, err := client.GetSubmissionStats(ctx)
+	if err != nil {
+		t.Fatalf("GetSubmissionStats: %v", err)
+	}
+	if stats.TotalAttempts != 0 || stats.UniqueTesters != 0 {
+		t.Fatalf("expected empty stats, got %+v", stats)
+	}
+
+	if err := client.RecordSubmissionStats(ctx, "user-a"); err != nil {
+		t.Fatalf("RecordSubmissionStats: %v", err)
+	}
+	if err := client.RecordSubmissionStats(ctx, "user-a"); err != nil {
+		t.Fatalf("RecordSubmissionStats second: %v", err)
+	}
+	if err := client.RecordSubmissionStats(ctx, "user-b"); err != nil {
+		t.Fatalf("RecordSubmissionStats user-b: %v", err)
+	}
+
+	stats, err = client.GetSubmissionStats(ctx)
+	if err != nil {
+		t.Fatalf("GetSubmissionStats after: %v", err)
+	}
+	if stats.TotalAttempts != 3 {
+		t.Fatalf("total_attempts = %d, want 3", stats.TotalAttempts)
+	}
+	if stats.UniqueTesters != 2 {
+		t.Fatalf("unique_testers = %d, want 2", stats.UniqueTesters)
+	}
+}
+
 func TestMarkWinner(t *testing.T) {
 	mr, err := miniredis.Run()
 	if err != nil {
