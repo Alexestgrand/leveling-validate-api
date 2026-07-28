@@ -14,7 +14,7 @@ import (
 	redisstore "github.com/leveling-unite/validate-api/internal/redis"
 )
 
-const oauthStateCookie = "oauth_state"
+const oauthStateTTL = 10 * time.Minute
 
 // AuthHandler manages Discord OAuth2 and session endpoints.
 type AuthHandler struct {
@@ -31,8 +31,10 @@ func (h *AuthHandler) cookieSecure() bool {
 	return h.cfg.IsProduction()
 }
 
+// SameSite=None is only needed for cross-domain cookies. With the Vercel /api proxy,
+// COOKIE_DOMAIN is empty and cookies are first-party on the front domain.
 func (h *AuthHandler) cookieCrossOrigin() bool {
-	return h.cfg.IsProduction()
+	return h.cfg.IsProduction() && h.cfg.CookieDomain != ""
 }
 
 func (h *AuthHandler) redirectAuthError(c *gin.Context, code string) {
@@ -52,9 +54,15 @@ func (h *AuthHandler) DiscordRedirect(c *gin.Context) {
 		return
 	}
 
-	// Store state in a short-lived cookie to prevent CSRF on callback.
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(oauthStateCookie, state, 600, "/", h.cfg.CookieDomain, h.cookieSecure(), true)
+	// Store state server-side — survives Vercel proxy (unlike a cross-domain cookie).
+	if err := h.redis.StoreOAuthState(c.Request.Context(), state, oauthStateTTL); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"message": "Service temporairement indisponible.",
+			"code":    "REDIS_ERROR",
+		})
+		return
+	}
 
 	c.Redirect(http.StatusFound, h.oauth.AuthorizeURL(state))
 }
@@ -66,12 +74,16 @@ func (h *AuthHandler) DiscordCallback(c *gin.Context) {
 		return
 	}
 
-	stateCookie, err := c.Cookie(oauthStateCookie)
-	if err != nil || stateCookie == "" || stateCookie != c.Query("state") {
+	state := c.Query("state")
+	ok, err := h.redis.ConsumeOAuthState(c.Request.Context(), state)
+	if err != nil {
+		h.redirectAuthError(c, "OAUTH_FAILED")
+		return
+	}
+	if !ok {
 		h.redirectAuthError(c, "INVALID_STATE")
 		return
 	}
-	c.SetCookie(oauthStateCookie, "", -1, "/", h.cfg.CookieDomain, h.cookieSecure(), true)
 
 	code := c.Query("code")
 	if code == "" {
@@ -93,7 +105,7 @@ func (h *AuthHandler) DiscordCallback(c *gin.Context) {
 	}
 
 	// Single eligibility rule: Discord account age >= MIN_ACCOUNT_AGE_DAYS (snowflake-derived).
-	ok, err := discord.IsAccountOldEnough(user.ID, h.cfg.MinAccountAgeDays, time.Now())
+	ok, err = discord.IsAccountOldEnough(user.ID, h.cfg.MinAccountAgeDays, time.Now())
 	if err != nil {
 		h.redirectAuthError(c, "OAUTH_FAILED")
 		return
@@ -118,9 +130,9 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	user, ok := middleware.GetAuthUser(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{
-			"success":   false,
-			"message":   "Non authentifié.",
-			"code":      "UNAUTHORIZED",
+			"success":       false,
+			"message":       "Non authentifié.",
+			"code":          "UNAUTHORIZED",
 			"authenticated": false,
 		})
 		return
@@ -151,11 +163,11 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"authenticated":       true,
-		"user_id":             user.DiscordUserID,
-		"username":            user.Username,
-		"remaining_attempts":  remaining,
-		"already_won":         winner,
+		"authenticated":      true,
+		"user_id":            user.DiscordUserID,
+		"username":           user.Username,
+		"remaining_attempts": remaining,
+		"already_won":        winner,
 	})
 }
 

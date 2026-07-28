@@ -85,7 +85,8 @@ func Load() (*Config, error) {
 		JWTSecret:            []byte(jwtSecret),
 		SecretPhrase:         secretPhrase,
 		AllowedOrigins:       cleanOrigins,
-		CookieDomain:         getEnv("COOKIE_DOMAIN", "localhost"),
+		// Empty = host-only cookie (required when OAuth/session go through the Vercel /api proxy).
+		CookieDomain:         strings.TrimSpace(os.Getenv("COOKIE_DOMAIN")),
 		MaxAttemptsPerDay:    maxAttempts,
 		MinAccountAgeDays:    minAge,
 		RateLimitWindowHours: windowHours,

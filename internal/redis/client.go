@@ -12,6 +12,7 @@ import (
 const (
 	attemptsKeyPrefix     = "attempts:"
 	winnerKeyPrefix       = "winner:"
+	oauthStateKeyPrefix   = "oauth_state:"
 	statsTotalAttemptsKey = "stats:total_attempts"
 	statsTestersKey       = "stats:testers"
 )
@@ -197,6 +198,33 @@ func (c *Client) GetSubmissionStats(ctx context.Context) (SubmissionStats, error
 	stats.TotalAttempts = total
 	stats.UniqueTesters = unique
 	return stats, nil
+}
+
+// StoreOAuthState saves a one-time CSRF token for the Discord OAuth redirect.
+func (c *Client) StoreOAuthState(ctx context.Context, state string, ttl time.Duration) error {
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+	return c.rdb.Set(ctx, oauthStateKeyPrefix+state, "1", ttl).Err()
+}
+
+// ConsumeOAuthState validates and deletes a CSRF token (one-time use).
+func (c *Client) ConsumeOAuthState(ctx context.Context, state string) (bool, error) {
+	if state == "" {
+		return false, nil
+	}
+
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+
+	key := oauthStateKeyPrefix + state
+	val, err := c.rdb.GetDel(ctx, key).Result()
+	if err == redis.Nil {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return val != "", nil
 }
 
 // Raw exposes the underlying client for health checks or testing.
