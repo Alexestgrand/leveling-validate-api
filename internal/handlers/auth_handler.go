@@ -115,6 +115,10 @@ func (h *AuthHandler) DiscordCallback(c *gin.Context) {
 	accessToken, err := h.oauth.ExchangeCode(ctx, code)
 	if err != nil {
 		log.Printf("oauth: token exchange failed: %v", err)
+		if _, ok := err.(*discord.RateLimitedError); ok {
+			h.redirectAuthError(c, "DISCORD_RATE_LIMITED")
+			return
+		}
 		h.redirectAuthError(c, "OAUTH_FAILED")
 		return
 	}
@@ -122,6 +126,10 @@ func (h *AuthHandler) DiscordCallback(c *gin.Context) {
 	user, err := h.oauth.FetchUser(ctx, accessToken)
 	if err != nil {
 		log.Printf("oauth: fetch user failed: %v", err)
+		if _, ok := err.(*discord.RateLimitedError); ok {
+			h.redirectAuthError(c, "DISCORD_RATE_LIMITED")
+			return
+		}
 		h.redirectAuthError(c, "OAUTH_FAILED")
 		return
 	}
