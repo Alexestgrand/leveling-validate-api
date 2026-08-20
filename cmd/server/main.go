@@ -40,16 +40,34 @@ func main() {
 
 	oauthClient := discord.NewOAuthClient(cfg.DiscordClientID, cfg.DiscordClientSecret, cfg.DiscordRedirectURI)
 
+	log.Printf(
+		"oauth config: client_id=%s redirect_uri=%s frontend_url=%s cookie_domain=%q env=%s",
+		cfg.DiscordClientID,
+		cfg.DiscordRedirectURI,
+		cfg.FrontendURL,
+		cfg.CookieDomain,
+		cfg.Env,
+	)
+
 	authHandler := handlers.NewAuthHandler(cfg, oauthClient, redisClient)
 	validateHandler := handlers.NewValidateHandler(cfg, redisClient)
 	healthHandler := handlers.NewHealthHandler(redisClient)
 	statsHandler := handlers.NewStatsHandler(redisClient)
 
 	router := gin.New()
+	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
 	router.Use(middleware.SecurityHeaders())
 	router.Use(middleware.CORS(cfg.AllowedOrigins))
 
+	// Root is intentionally informational — Discord OAuth lives under /auth/*.
+	router.GET("/", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"service": "leveling-validate-api",
+			"status":  "ok",
+			"routes":  []string{"/health", "/stats", "/auth/discord", "/auth/me", "/validate"},
+		})
+	})
 	router.GET("/health", healthHandler.Health)
 	router.GET("/stats", statsHandler.Stats)
 

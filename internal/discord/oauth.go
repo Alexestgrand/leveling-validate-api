@@ -55,6 +55,12 @@ func NewOAuthClient(clientID, clientSecret, redirectURI string) *OAuthClient {
 	}
 }
 
+// ClientID returns the Discord application client id (safe to log).
+func (c *OAuthClient) ClientID() string { return c.clientID }
+
+// RedirectURI returns the configured OAuth redirect URI (safe to log).
+func (c *OAuthClient) RedirectURI() string { return c.redirectURI }
+
 // AuthorizeURL builds the Discord OAuth2 authorization redirect URL (scope: identify).
 func (c *OAuthClient) AuthorizeURL(state string) string {
 	params := url.Values{}
