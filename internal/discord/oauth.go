@@ -20,7 +20,15 @@ const (
 	// Discord/Cloudflare often rate-limits shared cloud egress IPs (Render, CF Workers…).
 	maxDiscordRetries = 4
 	retryBaseDelay    = 1500 * time.Millisecond
+
+	// Discord /users/@me payloads often exceed 512B (avatar, banner, decorations…).
+	maxDiscordBodyBytes = 64 << 10 // 64 KiB
 )
+
+func readDiscordBody(resp *http.Response) ([]byte, error) {
+	defer resp.Body.Close()
+	return io.ReadAll(io.LimitReader(resp.Body, maxDiscordBodyBytes))
+}
 
 // User represents the subset of Discord user fields needed by this API.
 type User struct {
@@ -159,13 +167,22 @@ func (c *OAuthClient) ExchangeCode(ctx context.Context, code string) (string, er
 			continue
 		}
 
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		resp.Body.Close()
+		body, err := readDiscordBody(resp)
+		if err != nil {
+			lastErr = fmt.Errorf("read token response: %w", err)
+			if attempt+1 >= maxDiscordRetries {
+				break
+			}
+			if err := sleepBackoff(ctx, attempt, 0); err != nil {
+				return "", err
+			}
+			continue
+		}
 
 		if resp.StatusCode == http.StatusOK {
 			var tr tokenResponse
 			if err := json.Unmarshal(body, &tr); err != nil {
-				return "", fmt.Errorf("decode token response: %w", err)
+				return "", fmt.Errorf("decode token response (len=%d): %w", len(body), err)
 			}
 			if tr.AccessToken == "" {
 				return "", fmt.Errorf("empty access token in response")
@@ -225,17 +242,34 @@ func (c *OAuthClient) FetchUser(ctx context.Context, accessToken string) (*User,
 			continue
 		}
 
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		resp.Body.Close()
+		body, err := readDiscordBody(resp)
+		if err != nil {
+			lastErr = fmt.Errorf("read user response: %w", err)
+			if attempt+1 >= maxDiscordRetries {
+				break
+			}
+			if err := sleepBackoff(ctx, attempt, 0); err != nil {
+				return nil, err
+			}
+			continue
+		}
 
 		if resp.StatusCode == http.StatusOK {
 			var user User
 			if err := json.Unmarshal(body, &user); err != nil {
-				return nil, fmt.Errorf("decode user response: %w", err)
+				log.Printf(
+					"oauth: decode user failed status=%d body_len=%d preview=%q err=%v",
+					resp.StatusCode,
+					len(body),
+					trimForLog(string(body), 120),
+					err,
+				)
+				return nil, fmt.Errorf("decode user response (len=%d): %w", len(body), err)
 			}
 			if user.ID == "" {
 				return nil, fmt.Errorf("discord user id missing in response")
 			}
+			log.Printf("oauth: fetch user ok id=%s username=%s body_len=%d", user.ID, user.Username, len(body))
 			return &user, nil
 		}
 
@@ -264,4 +298,11 @@ func (c *OAuthClient) FetchUser(ctx context.Context, accessToken string) (*User,
 		return nil, lastErr
 	}
 	return nil, fmt.Errorf("fetch user failed after retries")
+}
+
+func trimForLog(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
