@@ -76,7 +76,7 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("ALLOWED_ORIGINS must contain at least one origin")
 	}
 
-	submissionDeadline, err := time.Parse(time.RFC3339, getEnv("SUBMISSION_DEADLINE", "2026-08-28T21:10:00+02:00"))
+	submissionDeadline, err := time.Parse(time.RFC3339, getEnv("SUBMISSION_DEADLINE", "2026-08-28T21:15:00+02:00"))
 	if err != nil {
 		return nil, fmt.Errorf("SUBMISSION_DEADLINE: %w", err)
 	}
