@@ -26,6 +26,8 @@ type Config struct {
 	RateLimitWindowHours int
 	JWTExpiration        time.Duration
 	RedisTimeout         time.Duration
+	// SubmissionDeadline closes phrase validation after this instant (Paris event time).
+	SubmissionDeadline time.Time
 }
 
 // Load reads configuration from environment variables.
@@ -74,6 +76,11 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("ALLOWED_ORIGINS must contain at least one origin")
 	}
 
+	submissionDeadline, err := time.Parse(time.RFC3339, getEnv("SUBMISSION_DEADLINE", "2026-08-28T21:06:00+02:00"))
+	if err != nil {
+		return nil, fmt.Errorf("SUBMISSION_DEADLINE: %w", err)
+	}
+
 	return &Config{
 		Port:                 getEnv("PORT", "8080"),
 		Env:                  getEnv("ENV", "development"),
@@ -92,6 +99,7 @@ func Load() (*Config, error) {
 		RateLimitWindowHours: windowHours,
 		JWTExpiration:        24 * time.Hour,
 		RedisTimeout:         2 * time.Second,
+		SubmissionDeadline:   submissionDeadline,
 	}, nil
 }
 

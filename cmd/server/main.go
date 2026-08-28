@@ -53,6 +53,8 @@ func main() {
 	validateHandler := handlers.NewValidateHandler(cfg, redisClient)
 	healthHandler := handlers.NewHealthHandler(redisClient)
 	statsHandler := handlers.NewStatsHandler(redisClient)
+	eventHandler := handlers.NewEventHandler(cfg, redisClient)
+	feedbackHandler := handlers.NewFeedbackHandler(cfg, redisClient)
 
 	router := gin.New()
 	router.Use(gin.Logger())
@@ -65,11 +67,20 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{
 			"service": "leveling-validate-api",
 			"status":  "ok",
-			"routes":  []string{"/health", "/stats", "/auth/discord", "/auth/me", "/validate"},
+			"routes":  []string{"/health", "/stats", "/event/status", "/feedback", "/auth/discord", "/auth/me", "/validate"},
 		})
 	})
 	router.GET("/health", healthHandler.Health)
 	router.GET("/stats", statsHandler.Stats)
+	router.GET("/event/status", eventHandler.Status)
+	router.GET("/feedback", feedbackHandler.List)
+	router.POST("/feedback",
+		func(c *gin.Context) {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4<<10)
+			c.Next()
+		},
+		feedbackHandler.Create,
+	)
 
 	auth := router.Group("/auth")
 	{

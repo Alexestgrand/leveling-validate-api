@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -16,6 +17,20 @@ type ValidateHandler struct {
 	cfg              *config.Config
 	redis            *redisstore.Client
 	normalizedSecret string // pre-normalized at startup; never logged
+}
+
+func (h *ValidateHandler) submissionClosed(ctx context.Context) (bool, string, error) {
+	if time.Now().After(h.cfg.SubmissionDeadline) {
+		return true, "deadline", nil
+	}
+	closed, err := h.redis.IsEventSubmissionClosed(ctx)
+	if err != nil {
+		return false, "", err
+	}
+	if closed {
+		return true, "winner", nil
+	}
+	return false, "", nil
 }
 
 func NewValidateHandler(cfg *config.Config, redis *redisstore.Client) *ValidateHandler {
@@ -43,6 +58,28 @@ func (h *ValidateHandler) Validate(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+
+	closed, reason, err := h.submissionClosed(ctx)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"message": "Service temporairement indisponible.",
+			"code":    "REDIS_ERROR",
+		})
+		return
+	}
+	if closed {
+		msg := "La fenêtre de soumission est terminée."
+		if reason == "winner" {
+			msg = "Un camp a déjà validé la phrase. La soumission est close."
+		}
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": msg,
+			"code":    "SUBMISSION_CLOSED",
+		})
+		return
+	}
 
 	winner, err := h.redis.IsWinner(ctx, user.DiscordUserID)
 	if err != nil {
@@ -126,6 +163,15 @@ func (h *ValidateHandler) Validate(c *gin.Context) {
 
 	if match {
 		if err := h.redis.MarkWinner(ctx, user.DiscordUserID); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"success": false,
+				"message": "Service temporairement indisponible.",
+				"code":    "REDIS_ERROR",
+			})
+			return
+		}
+
+		if _, err := h.redis.CloseEventSubmissions(ctx, user.DiscordUserID); err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
 				"success": false,
 				"message": "Service temporairement indisponible.",
